@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "events": [
+    {
+      "t": 3.3213563,
+      "type": "down",
+      "key": "esc"
+    },
+    {
+      "t": 3.4970523,
+      "type": "up",
+      "key": "esc"
+    }
+  ]
+}
