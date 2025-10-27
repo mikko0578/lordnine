@@ -1,4 +1,4 @@
-monitor_index: 1
+monitor_index: 2
 dpi_scale: 1.0
 screen:
   width: null
@@ -8,7 +8,7 @@ window:
   require_foreground: true
   require_maximized: true
   auto_focus: true
-  force_to_monitor_index: 1
+  force_to_monitor_index: 2
   click_to_focus: true
 keybinds:
   interact: e

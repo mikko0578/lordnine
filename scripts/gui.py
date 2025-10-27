@@ -243,8 +243,6 @@ class LauncherGUI:
                                              padx=10, pady=3)
         self.monitor_detection_btn.pack(side=tk.LEFT, padx=(0, 20))
         
-        # Initialize monitor detection on startup (silent) - after UI elements are created
-        self._detect_monitors(show_log=False)
 
         # Asset status indicator
         self.asset_status_label = tk.Label(second_row_frame, text="", font=("Roboto", 10, "bold"), fg='#28a745', bg='#f5f5f5')
@@ -275,6 +273,9 @@ class LauncherGUI:
         self.root.after(100, self._poll_log_queue)
 
         # Safety & ToS reminder removed
+
+        # Initialize monitor detection on startup (silent) - after all UI elements are created
+        self._detect_monitors(show_log=False)
 
     def _load_cfg(self) -> dict:
         try:
@@ -348,15 +349,9 @@ class LauncherGUI:
             cfg["window"]["force_to_monitor_index"] = selected_monitor
             
             if self._save_cfg(cfg):
-                self._append_log(f"Monitor changed to Monitor {selected_monitor} (1920x1080) - Game will be moved to this monitor\n")
-                
-                # If automation is running, restart it to pick up the new monitor setting
-                if self.proc and self.proc.poll() is None:
-                    self._append_log("Restarting automation to apply monitor change...\n")
-                    self.stop()
-                    # Small delay to ensure process is fully stopped
-                    time.sleep(0.5)
-                    self.start()
+                self._append_log(f"Monitor selection changed to Monitor {selected_monitor} (1920x1080)\n")
+                self._append_log(f"Config updated: monitor_index={selected_monitor}, force_to_monitor_index={selected_monitor}\n")
+                self._append_log("Click 'Start' to apply the new monitor setting.\n")
         except Exception as e:
             self._append_log(f"Error changing monitor: {e}\n")
 
@@ -384,22 +379,47 @@ class LauncherGUI:
         cfg = self._load_cfg()
         current_monitor = int(cfg.get("monitor_index", 1))
         
-        # Find the index of the current monitor in the filtered list
-        monitor_idx = 0
-        for i, mon in enumerate(monitors):
-            if mon["index"] == current_monitor:
-                monitor_idx = i
-                break
+        # Check if current monitor is still available in detected monitors
+        current_monitor_available = any(mon["index"] == current_monitor for mon in monitors)
+        
+        if current_monitor_available:
+            # Use current monitor if it's still available
+            monitor_idx = 0
+            for i, mon in enumerate(monitors):
+                if mon["index"] == current_monitor:
+                    monitor_idx = i
+                    break
+        else:
+            # Use first available monitor if current one is not available
+            monitor_idx = 0
+            current_monitor = monitors[0]["index"]
         
         self.monitor_combo.current(monitor_idx)
         self.monitor_var.set(monitor_names[monitor_idx])
         
-        # Ensure force_to_monitor_index is set to match monitor_index
-        cfg_raw = self._load_cfg_raw()
-        if "window" not in cfg_raw:
-            cfg_raw["window"] = {}
-        cfg_raw["window"]["force_to_monitor_index"] = current_monitor
-        self._save_cfg(cfg_raw)
+        # Only update config on startup detection, not on manual detection
+        # This allows user to change selection without immediately applying it
+        if not hasattr(self, '_startup_detection_complete'):
+            # This is startup detection - update config with first monitor
+            cfg_raw = self._load_cfg_raw()
+            cfg_raw["monitor_index"] = current_monitor
+            
+            # Set force_to_monitor_index to match monitor_index
+            if "window" not in cfg_raw:
+                cfg_raw["window"] = {}
+            cfg_raw["window"]["force_to_monitor_index"] = current_monitor
+            
+            self._save_cfg(cfg_raw)
+            
+            # Log the config update with debug info
+            if hasattr(self, '_append_log'):
+                monitor_info = f"Monitor {current_monitor} ({monitors[0]['resolution']})"
+                self._append_log(f"Startup: Set config to {monitor_info} (first 1920x1080 monitor)\n")
+                self._append_log(f"Debug: monitor_index={current_monitor}, force_to_monitor_index={current_monitor}\n")
+                monitor_list = [f'Monitor {m["index"]}' for m in monitors]
+                self._append_log(f"Debug: Available monitors: {monitor_list}\n")
+            
+            self._startup_detection_complete = True
 
     def _hide_monitor_dropdown(self):
         """Hide the monitor dropdown."""
@@ -502,10 +522,53 @@ class LauncherGUI:
             pass
         self.root.after(100, self._poll_log_queue)
 
+    def _apply_current_monitor_selection(self):
+        """Apply the current monitor selection from dropdown to config."""
+        try:
+            self._append_log("Debug: Applying current monitor selection...\n")
+            if hasattr(self, 'monitor_combo') and hasattr(self, 'monitor_var'):
+                monitors = get_monitor_info()
+                if monitors:
+                    # Get the currently selected monitor from dropdown
+                    current_selection = self.monitor_var.get()
+                    monitor_names = [f"{mon['name']} ({mon['resolution']})" for mon in monitors]
+                    
+                    self._append_log(f"Debug: Current selection='{current_selection}', Available={monitor_names}\n")
+                    
+                    if current_selection in monitor_names:
+                        selected_idx = monitor_names.index(current_selection)
+                        selected_monitor = monitors[selected_idx]["index"]
+                        
+                        # Update config with selected monitor
+                        cfg = self._load_cfg_raw()
+                        cfg["monitor_index"] = selected_monitor
+                        
+                        if "window" not in cfg:
+                            cfg["window"] = {}
+                        cfg["window"]["force_to_monitor_index"] = selected_monitor
+                        
+                        self._save_cfg(cfg)
+                        self._append_log(f"Applied Monitor {selected_monitor} for automation (force + image recognition)\n")
+                        self._append_log(f"Debug: monitor_index={selected_monitor}, force_to_monitor_index={selected_monitor}\n")
+                        monitor_list = [f'Monitor {m["index"]}' for m in monitors]
+                        self._append_log(f"Debug: Available monitors: {monitor_list}\n")
+                    else:
+                        self._append_log(f"Debug: Current selection not found in available monitors\n")
+                else:
+                    self._append_log("Debug: No monitors available for selection\n")
+            else:
+                self._append_log("Debug: Monitor combo or var not available\n")
+        except Exception as e:
+            self._append_log(f"Error applying monitor selection: {e}\n")
+
     def start(self):
         if self.proc and self.proc.poll() is None:
             messagebox.showwarning("Already running", "Automation is already running.")
             return
+        
+        # Apply current monitor selection before starting
+        self._apply_current_monitor_selection()
+        
         cfg = self.cfg_path
         # reset stop flag for new run
         self._stop_event.clear()
