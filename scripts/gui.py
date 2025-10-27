@@ -73,66 +73,139 @@ def _relaunch_as_admin():
 class LauncherGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Lordnine Automation Launcher")
+        self.root.title("Lordnine Automation")
+        self.root.configure(bg='#f5f5f5')
         self.proc: subprocess.Popen | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.reader_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        # Controls
-        frm = tk.Frame(root, padx=10, pady=10)
-        frm.pack(fill=tk.BOTH, expand=True)
-
         # Internal config path reference
         self.cfg_path = repo_path("l9", "config.yaml")
 
-        # Row 1: Start/Stop buttons (primary controls)
-        self.start_btn = tk.Button(frm, text="Start", width=12, command=self.start)
-        self.stop_btn = tk.Button(frm, text="Stop", width=12, command=self.stop, state=tk.DISABLED)
-        self.start_btn.grid(row=0, column=0, sticky="w", pady=(5, 5))
-        self.stop_btn.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=(5, 5))
+        # Main container
+        main_frame = tk.Frame(root, bg='#f5f5f5')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Row 2: Main action buttons
-        self.upload_btn = tk.Button(frm, text="Upload Images", width=14, command=self.open_upload_assets)
-        self.manage_spots_btn = tk.Button(frm, text="Manage Spots", width=14, command=self.open_manage_spots)
-        self.settings_btn = tk.Button(frm, text="Settings", width=12, command=self.open_key_settings)
-        self.upload_btn.grid(row=1, column=0, sticky="w", pady=(5, 5))
-        self.manage_spots_btn.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(5, 5))
-        self.settings_btn.grid(row=1, column=2, sticky="w", padx=(8, 0), pady=(5, 5))
+        # Header Section
+        header_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        header_frame.pack(fill=tk.X, pady=(0, 20))
 
-        # Row 3: Inputs and checkboxes
-        # Spot selector
+        # Title
+        title_label = tk.Label(header_frame, text="LORDNINE", 
+                              font=("Roboto", 12, "bold"), fg='#333333', bg='#f5f5f5')
+        title_label.pack(side=tk.LEFT)
+
+        # Status buttons in header
+        status_frame = tk.Frame(header_frame, bg='#f5f5f5')
+        status_frame.pack(side=tk.RIGHT)
+
+        self.running_btn = tk.Button(status_frame, text="Running", 
+                                   font=("Roboto", 8, "bold"), fg='white',
+                                   relief=tk.FLAT, padx=10, pady=3, state=tk.DISABLED)
+        self.running_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.admin_btn = tk.Button(status_frame, text="Admin", 
+                                 font=("Roboto", 8), fg='#666666',
+                                 relief=tk.FLAT, padx=10, pady=3, state=tk.DISABLED)
+        self.admin_btn.pack(side=tk.LEFT)
+
+        # Main Control Section
+        control_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        control_frame.pack(fill=tk.X, pady=(0, 20))
+
+        # Start/Stop buttons
+        button_frame = tk.Frame(control_frame, bg='#f5f5f5')
+        button_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Start button (large, primary)
+        self.start_btn = tk.Button(button_frame, text="▶ Start", 
+                                 font=("Roboto", 14, "bold"), fg='white', bg='#28a745',
+                                 relief=tk.FLAT, command=self.start)
+        self.start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        # Stop button (smaller, secondary)
+        self.stop_btn = tk.Button(button_frame, text="⏹ Stop", 
+                                font=("Roboto", 12), fg='#ffc107', bg='white',
+                                relief=tk.FLAT, command=self.stop, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Feature buttons row
+        feature_frame = tk.Frame(control_frame, bg='#f5f5f5')
+        feature_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Upload button
+        self.upload_btn = tk.Button(feature_frame, text="↑ Upload", 
+                                  font=("Roboto", 10), fg='#666666', bg='#e0e0e0',
+                                  relief=tk.FLAT, command=self.open_upload_assets)
+        self.upload_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        # Spots button
+        self.manage_spots_btn = tk.Button(feature_frame, text="📍 Spots", 
+                                        font=("Roboto", 10), fg='#666666', bg='#e0e0e0',
+                                        relief=tk.FLAT, command=self.open_manage_spots)
+        self.manage_spots_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        # Settings button
+        self.settings_btn = tk.Button(feature_frame, text="⚙ Settings", 
+                                    font=("Roboto", 10), fg='#666666', bg='#e0e0e0',
+                                    relief=tk.FLAT, command=self.open_key_settings)
+        self.settings_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Configuration row
+        config_frame = tk.Frame(control_frame, bg='#f5f5f5')
+        config_frame.pack(fill=tk.X)
+
+        # Spot selection (same line)
+        spot_row_frame = tk.Frame(config_frame, bg='#f5f5f5')
+        spot_row_frame.pack(fill=tk.X, pady=(0, 10))
+
+        spot_label = tk.Label(spot_row_frame, text="Spot:", font=("Roboto", 10), fg='#333333', bg='#f5f5f5')
+        spot_label.pack(side=tk.LEFT, padx=(0, 8))
+
         self.spot_var = tk.StringVar()
-        tk.Label(frm, text="Spot:").grid(row=2, column=0, sticky="e", padx=(0, 2), pady=(5, 5))
-        self.spot_combo = ttk.Combobox(frm, textvariable=self.spot_var, state="readonly", width=18)
-        self.spot_combo.grid(row=2, column=1, sticky="w", pady=(5, 5))
+        self.spot_combo = ttk.Combobox(spot_row_frame, textvariable=self.spot_var, state="readonly",
+                                     font=("Roboto", 10))
+        self.spot_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._init_spot_combo()
         self.spot_combo.bind("<<ComboboxSelected>>", self._on_spot_selected)
-        
-        # Multi-screen option
+
+        # Second row for Multi-Screen and Assets Ready
+        second_row_frame = tk.Frame(config_frame, bg='#f5f5f5')
+        second_row_frame.pack(fill=tk.X)
+
+        # Multi-screen checkbox
         self.multi_screen_var = tk.BooleanVar()
-        self.multi_screen_check = tk.Checkbutton(frm, text="Multi-Screen", variable=self.multi_screen_var, command=self._on_multi_screen_toggle)
-        self.multi_screen_check.grid(row=2, column=2, sticky="w", padx=(8, 0), pady=(5, 5))
+        self.multi_screen_check = tk.Checkbutton(second_row_frame, text="Multi-Screen", 
+                                               variable=self.multi_screen_var, command=self._on_multi_screen_toggle,
+                                               font=("Roboto", 10), fg='#333333', bg='#f5f5f5',
+                                               selectcolor='#333333', activebackground='#f5f5f5')
+        self.multi_screen_check.pack(side=tk.LEFT)
         self._load_multi_screen_setting()
-        
+
         # Asset status indicator
-        self.asset_status_label = tk.Label(frm, text="", font=("Arial", 8))
-        self.asset_status_label.grid(row=2, column=3, sticky="w", padx=(8, 0), pady=(5, 5))
+        self.asset_status_label = tk.Label(second_row_frame, text="", font=("Roboto", 10, "bold"), fg='#28a745', bg='#f5f5f5')
+        self.asset_status_label.pack(side=tk.RIGHT)
         self._update_asset_status()
 
-        # Status row
-        self.status_var = tk.StringVar(value="Idle")
-        self.admin_var = tk.StringVar(value=("Admin" if _is_admin() else "User"))
-        tk.Label(frm, textvariable=self.status_var, anchor="w").grid(row=3, column=0, columnspan=4, sticky="we")
-        tk.Label(frm, textvariable=self.admin_var, anchor="e").grid(row=3, column=4, columnspan=2, sticky="e")
+        # Console Output Section
+        console_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        console_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Logs
-        self.log = scrolledtext.ScrolledText(frm, height=12, state=tk.DISABLED)
-        self.log.grid(row=4, column=0, columnspan=6, sticky="nsew", pady=(8, 0))
+        # Separator line
+        separator = tk.Frame(console_frame, height=1, bg='#cccccc')
+        separator.pack(fill=tk.X, pady=(0, 10))
 
-        for c in range(6):
-            frm.columnconfigure(c, weight=1)
-        frm.rowconfigure(4, weight=1)
+        # Console title
+        console_title = tk.Label(console_frame, text="Console Output", 
+                               font=("Roboto", 12, "bold"), fg='#333333', bg='#f5f5f5')
+        console_title.pack(anchor=tk.W, pady=(0, 10))
+
+        # Log display
+        self.log = scrolledtext.ScrolledText(console_frame, height=15, state=tk.DISABLED,
+                                           font=("Consolas", 9), bg='white', fg='#333333',
+                                           relief=tk.FLAT, bd=0)
+        self.log.pack(fill=tk.BOTH, expand=True)
 
         # Close handler and log polling
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -220,17 +293,17 @@ class LauncherGUI:
             
             if existing_assets == total_assets:
                 status_text = "✅ Assets Ready"
-                color = "green"
+                color = "#28a745"  # Green
             elif existing_assets > total_assets // 2:
                 status_text = f"⚠️ {existing_assets}/{total_assets} Assets"
-                color = "orange"
+                color = "#ffc107"  # Orange
             else:
                 status_text = f"❌ {existing_assets}/{total_assets} Assets"
-                color = "red"
+                color = "#dc3545"  # Red
                 
             self.asset_status_label.config(text=status_text, fg=color)
         except Exception:
-            self.asset_status_label.config(text="❓ Assets Unknown", fg="gray")
+            self.asset_status_label.config(text="❓ Assets Unknown", fg="#6c757d")
 
 
     def _append_log(self, text: str):
@@ -276,7 +349,7 @@ class LauncherGUI:
             return
         else:
             if os.name == "nt":
-                self.admin_var.set("Admin")
+                self.admin_btn.config(text="Admin", fg='white', bg='#333333')
 
         if not os.path.isfile(cfg):
             messagebox.showerror("Config not found", f"Config file not found:\n{cfg}")
@@ -359,12 +432,9 @@ class LauncherGUI:
             pass
 
         # Kick off the fixed sequence on a background thread to avoid blocking the GUI
-        self.log.configure(state=tk.NORMAL)
-        self.log.delete("1.0", tk.END)
-        self.log.configure(state=tk.DISABLED)
-        self.status_var.set("Running")
         self.start_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.NORMAL)
+        self.running_btn.config(text="Running", fg='white', bg='#333333')
 
         def run_sequence():
             try:
@@ -424,7 +494,7 @@ class LauncherGUI:
                 self.log_queue.put(f"[error] Launch failed: {e}\n")
             finally:
                 # reset controls on UI thread
-                self.root.after(0, lambda: self.status_var.set("Idle"))
+                self.root.after(0, lambda: self.running_btn.config(text="Idle", fg='#666666', bg='#e0e0e0'))
                 self.root.after(0, lambda: self.start_btn.configure(state=tk.NORMAL))
                 self.root.after(0, lambda: self.stop_btn.configure(state=tk.DISABLED))
 
@@ -453,6 +523,9 @@ class LauncherGUI:
 
         win = tk.Toplevel(self.root)
         win.title("Settings - Keybinds")
+        win.geometry("500x300")
+        win.resizable(False, False)
+        win.state('normal')
         tk.Label(win, text="Open Inventory").grid(row=0, column=0, sticky="e")
         tk.Entry(win, textvariable=inv, width=10).grid(row=0, column=1, sticky="w")
         tk.Label(win, text="Open Map").grid(row=1, column=0, sticky="e")
@@ -516,6 +589,9 @@ class LauncherGUI:
     def open_upload_assets(self):
         win = tk.Toplevel(self.root)
         win.title("Upload Assets")
+        win.geometry("600x400")
+        win.resizable(False, False)
+        win.state('normal')
         
         # Check asset status
         asset_status = self._check_assets_status()
@@ -525,7 +601,7 @@ class LauncherGUI:
         existing_assets = sum(1 for info in asset_status.values() if info['exists'])
         
         summary_label = tk.Label(win, text=f"Assets: {existing_assets}/{total_assets} present", 
-                                font=("Arial", 10, "bold"))
+                                font=("Roboto", 10, "bold"))
         summary_label.grid(row=0, column=0, columnspan=3, pady=(0, 10))
         
         tk.Label(win, text="Asset").grid(row=1, column=0, sticky="w")
@@ -706,6 +782,9 @@ class LauncherGUI:
 
         win = tk.Toplevel(self.root)
         win.title("Manage Grind Spots")
+        win.geometry("700x500")
+        win.resizable(False, False)
+        win.state('normal')
         tk.Label(win, text="ID").grid(row=0, column=0, sticky="w")
         tk.Label(win, text="Name").grid(row=0, column=1, sticky="w")
         tk.Label(win, text="Templates").grid(row=0, column=2, sticky="w")
@@ -842,9 +921,9 @@ class LauncherGUI:
         # signal any waiting loops to stop
         self._stop_event.set()
         if not self.proc or self.proc.poll() is not None:
-            self.status_var.set("Idle")
             self.start_btn.configure(state=tk.NORMAL)
             self.stop_btn.configure(state=tk.DISABLED)
+            self.running_btn.config(text="Idle", fg='#666666', bg='#e0e0e0')
             return
         # Stopping automation
         try:
@@ -858,9 +937,9 @@ class LauncherGUI:
                 self.proc.kill()
             except Exception:
                 pass
-        self.status_var.set("Stopped")
         self.start_btn.configure(state=tk.NORMAL)
         self.stop_btn.configure(state=tk.DISABLED)
+        self.running_btn.config(text="Idle", fg='#666666', bg='#e0e0e0')
 
     def on_close(self):
         if self.proc and self.proc.poll() is None:
@@ -873,8 +952,8 @@ class LauncherGUI:
 def main():
     root = tk.Tk()
     LauncherGUI(root)
-    root.minsize(800, 450)  # Slightly larger for better layout
-    root.geometry("900x500")  # Set default size
+    root.minsize(440, 450)  # Match the design width
+    root.geometry("440x500")  # Set exact width to match design
     root.resizable(False, False)  # Prevent resizing and maximization
     root.state('normal')  # Ensure window is not maximized
     root.mainloop()

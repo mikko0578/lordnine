@@ -166,3 +166,4 @@ revive:
   retrieve_timeout_s: 3.0
 dungeon:
   gates: []
+multi_screen: true
