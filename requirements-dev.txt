@@ -2,7 +2,7 @@
 watchdog>=2.1.0
 
 # Core dependencies (if not already installed)
-pyinstaller>=5.0
+pyinstaller==5.1
 mss>=6.0.0
 opencv-python>=4.5.0
 numpy>=1.20.0
