@@ -1148,9 +1148,9 @@ class LauncherGUI:
             if self._save_cfg(cfg):
                 # Spots saved
                 self._init_spot_combo()
-                # Also refresh monitor combo if it exists
-                if hasattr(self, 'monitor_combo'):
-                    self._init_monitor_combo()
+                # Also refresh monitor detection if it exists
+                if hasattr(self, 'monitor_detection_btn'):
+                    self._detect_monitors(show_log=False)
                 win.destroy()
 
         tk.Button(win, text="Save", command=save_and_close).grid(row=row, column=0, columnspan=4, pady=(8,6))
