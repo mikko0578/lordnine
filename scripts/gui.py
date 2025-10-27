@@ -875,6 +875,8 @@ def main():
     LauncherGUI(root)
     root.minsize(800, 450)  # Slightly larger for better layout
     root.geometry("900x500")  # Set default size
+    root.resizable(False, False)  # Prevent resizing and maximization
+    root.state('normal')  # Ensure window is not maximized
     root.mainloop()
 
 
