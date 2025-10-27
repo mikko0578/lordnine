@@ -18,6 +18,55 @@ except Exception:
     pass
 import shutil
 
+try:
+    import mss
+except ModuleNotFoundError:
+    mss = None
+
+
+def get_monitor_info():
+    """Get monitor information for dropdown selection, filtered to 1920x1080 monitors only."""
+    if mss is None:
+        return [{"index": 1, "name": "Monitor 1", "resolution": "1920x1080"}]
+    
+    try:
+        with mss.mss() as s:
+            monitors = s.monitors
+            monitor_list = []
+            for i, mon in enumerate(monitors):
+                if i == 0:  # Skip monitor 0 (all monitors combined)
+                    continue
+                width = mon['width']
+                height = mon['height']
+                # Only include 1920x1080 monitors
+                if width == 1920 and height == 1080:
+                    monitor_list.append({
+                        "index": i,
+                        "name": f"Monitor {i}",
+                        "resolution": f"{width}x{height}"
+                    })
+            return monitor_list
+    except Exception:
+        return [{"index": 1, "name": "Monitor 1", "resolution": "1920x1080"}]
+
+
+def has_multiple_1920x1080_monitors():
+    """Check if system has multiple 1920x1080 monitors."""
+    if mss is None:
+        return False
+    try:
+        with mss.mss() as s:
+            monitors = s.monitors
+            count = 0
+            for i, mon in enumerate(monitors):
+                if i == 0:  # Skip monitor 0
+                    continue
+                if mon['width'] == 1920 and mon['height'] == 1080:
+                    count += 1
+            return count > 1
+    except Exception:
+        return False
+
 # Ensure repo root on sys.path when running as a script
 # Handle both development and executable modes
 if getattr(sys, 'frozen', False):
@@ -170,18 +219,32 @@ class LauncherGUI:
         self._init_spot_combo()
         self.spot_combo.bind("<<ComboboxSelected>>", self._on_spot_selected)
 
-        # Second row for Multi-Screen and Assets Ready
+        # Monitor selection (initially hidden, shown when multiple monitors detected)
+        self.monitor_row_frame = tk.Frame(config_frame, bg='#f5f5f5')
+        # Don't pack initially - will be shown/hidden dynamically
+
+        monitor_label = tk.Label(self.monitor_row_frame, text="Monitor:", font=("Roboto", 10), fg='#333333', bg='#f5f5f5')
+        monitor_label.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.monitor_var = tk.StringVar()
+        self.monitor_combo = ttk.Combobox(self.monitor_row_frame, textvariable=self.monitor_var, state="readonly",
+                                        font=("Roboto", 10))
+        self.monitor_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.monitor_combo.bind("<<ComboboxSelected>>", self._on_monitor_selected)
+        
+        # Second row for Monitor Detection and Assets Ready
         second_row_frame = tk.Frame(config_frame, bg='#f5f5f5')
         second_row_frame.pack(fill=tk.X)
 
-        # Multi-screen checkbox
-        self.multi_screen_var = tk.BooleanVar()
-        self.multi_screen_check = tk.Checkbutton(second_row_frame, text="Multi-Screen", 
-                                               variable=self.multi_screen_var, command=self._on_multi_screen_toggle,
-                                               font=("Roboto", 10), fg='#333333', bg='#f5f5f5',
-                                               selectcolor='#333333', activebackground='#f5f5f5')
-        self.multi_screen_check.pack(side=tk.LEFT)
-        self._load_multi_screen_setting()
+        # Monitor Detection button
+        self.monitor_detection_btn = tk.Button(second_row_frame, text="Detect Monitor", 
+                                             font=("Roboto", 10), fg='#666666', bg='#e0e0e0',
+                                             relief=tk.FLAT, command=self._detect_monitors,
+                                             padx=10, pady=3)
+        self.monitor_detection_btn.pack(side=tk.LEFT, padx=(0, 20))
+        
+        # Initialize monitor detection on startup (silent) - after UI elements are created
+        self._detect_monitors(show_log=False)
 
         # Asset status indicator
         self.asset_status_label = tk.Label(second_row_frame, text="", font=("Roboto", 10, "bold"), fg='#28a745', bg='#f5f5f5')
@@ -268,21 +331,130 @@ class LauncherGUI:
             # Active spot updated
             pass
 
-    def _on_multi_screen_toggle(self):
-        # Update multi-screen setting in config
-        cfg = self._load_cfg_raw()
-        if not cfg:
-            return
-        cfg["multi_screen"] = self.multi_screen_var.get()
-        self._save_cfg(cfg)
+    def _on_monitor_selected(self, event=None):
+        """Handle monitor selection change."""
+        monitors = get_monitor_info()
+        try:
+            idx = int(self.monitor_combo.current())
+            selected_monitor = monitors[idx]["index"]
+            
+            # Update config with new monitor selection
+            cfg = self._load_cfg_raw()
+            cfg["monitor_index"] = selected_monitor
+            
+            # Also set force_to_monitor_index to move the game window to selected monitor
+            if "window" not in cfg:
+                cfg["window"] = {}
+            cfg["window"]["force_to_monitor_index"] = selected_monitor
+            
+            if self._save_cfg(cfg):
+                self._append_log(f"Monitor changed to Monitor {selected_monitor} (1920x1080) - Game will be moved to this monitor\n")
+                
+                # If automation is running, restart it to pick up the new monitor setting
+                if self.proc and self.proc.poll() is None:
+                    self._append_log("Restarting automation to apply monitor change...\n")
+                    self.stop()
+                    # Small delay to ensure process is fully stopped
+                    time.sleep(0.5)
+                    self.start()
+        except Exception as e:
+            self._append_log(f"Error changing monitor: {e}\n")
 
-    def _load_multi_screen_setting(self):
-        # Load multi-screen setting from config - default to True (always on)
-        cfg = self._load_cfg_raw()
-        if cfg:
-            self.multi_screen_var.set(cfg.get("multi_screen", True))
-        else:
-            self.multi_screen_var.set(True)
+    def _check_and_show_monitor_dropdown(self):
+        """Check if monitor dropdown should be shown and initialize it."""
+        try:
+            monitors = get_monitor_info()
+            if monitors:
+                self._show_monitor_dropdown(monitors)
+            else:
+                self._hide_monitor_dropdown()
+        except Exception as e:
+            self._hide_monitor_dropdown()
+
+    def _show_monitor_dropdown(self, monitors):
+        """Show the monitor dropdown and populate it."""
+        # Pack the frame to make it visible above the detect monitor button
+        self.monitor_row_frame.pack(fill=tk.X, pady=(0, 10), before=self.monitor_detection_btn.master)
+        
+        # Initialize the dropdown with monitors
+        monitor_names = [f"{mon['name']} ({mon['resolution']})" for mon in monitors]
+        self.monitor_combo["values"] = monitor_names
+        
+        # Load current monitor setting from config
+        cfg = self._load_cfg()
+        current_monitor = int(cfg.get("monitor_index", 1))
+        
+        # Find the index of the current monitor in the filtered list
+        monitor_idx = 0
+        for i, mon in enumerate(monitors):
+            if mon["index"] == current_monitor:
+                monitor_idx = i
+                break
+        
+        self.monitor_combo.current(monitor_idx)
+        self.monitor_var.set(monitor_names[monitor_idx])
+        
+        # Ensure force_to_monitor_index is set to match monitor_index
+        cfg_raw = self._load_cfg_raw()
+        if "window" not in cfg_raw:
+            cfg_raw["window"] = {}
+        cfg_raw["window"]["force_to_monitor_index"] = current_monitor
+        self._save_cfg(cfg_raw)
+
+    def _hide_monitor_dropdown(self):
+        """Hide the monitor dropdown."""
+        self.monitor_row_frame.pack_forget()
+
+    def _detect_monitors(self, show_log=True):
+        """Detect monitors and update status."""
+        try:
+            if show_log:
+                self._append_log("Detecting monitors...\n")
+            monitors = get_monitor_info()
+            
+            if monitors:
+                monitor_count = len(monitors)
+                monitor_names = [mon['name'] for mon in monitors]
+                if show_log:
+                    self._append_log(f"Found {monitor_count} 1920x1080 monitor(s): {', '.join(monitor_names)}\n")
+                
+                # Always show dropdown with available monitors
+                self._show_monitor_dropdown(monitors)
+                if show_log:
+                    if monitor_count == 1:
+                        self._append_log("Monitor dropdown available with 1 monitor.\n")
+                    else:
+                        self._append_log("Monitor selection dropdown is now available.\n")
+                
+                # Update button text to show detection result
+                self.monitor_detection_btn.config(text=f"Detect Monitor (✓ {monitor_count})")
+            else:
+                if show_log:
+                    self._append_log("No 1920x1080 monitors detected.\n")
+                self._hide_monitor_dropdown()
+                self.monitor_detection_btn.config(text="Detect Monitor (✗ None)")
+            
+        except Exception as e:
+            if show_log:
+                self._append_log(f"Error detecting monitors: {e}\n")
+            self._hide_monitor_dropdown()
+            self.monitor_detection_btn.config(text="Detect Monitor (✗ Error)")
+
+    def _update_monitor_detection_status(self):
+        """Update monitor detection status indicator."""
+        try:
+            monitors = get_monitor_info()
+            if monitors:
+                monitor_count = len(monitors)
+                if monitor_count == 1:
+                    self.monitor_detection_btn.config(text=f"Detect Monitor (✓ {monitor_count})")
+                else:
+                    self.monitor_detection_btn.config(text=f"Detect Monitor (✓ {monitor_count})")
+            else:
+                self.monitor_detection_btn.config(text="Detect Monitor (✗ None)")
+            
+        except Exception as e:
+            self.monitor_detection_btn.config(text="Detect Monitor (✗ Error)")
 
     def _update_asset_status(self):
         """Update the asset status indicator on the main GUI."""
@@ -913,6 +1085,9 @@ class LauncherGUI:
             if self._save_cfg(cfg):
                 # Spots saved
                 self._init_spot_combo()
+                # Also refresh monitor combo if it exists
+                if hasattr(self, 'monitor_combo'):
+                    self._init_monitor_combo()
                 win.destroy()
 
         tk.Button(win, text="Save", command=save_and_close).grid(row=row, column=0, columnspan=4, pady=(8,6))
