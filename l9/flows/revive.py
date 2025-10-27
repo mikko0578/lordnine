@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from enum import Enum, auto
 from typing import Optional, Tuple
@@ -24,6 +25,7 @@ class RState(Enum):
     CLICK_RECLAIM = auto()
     CHECK_RETRIEVE = auto()
     CLICK_RETRIEVE = auto()
+    WAIT_HUD = auto()
     DONE = auto()
     FAIL = auto()
 
@@ -99,6 +101,42 @@ class ReviveFlow(Flow):
         cy = box.top + box.height // 2
         self.a.click(cx, cy)
 
+    def _wait_bag_icon(self, timeout_s: float) -> bool:
+        """Wait for bag icon to appear, indicating HUD is ready."""
+        try:
+            import pyautogui as pag  # type: ignore
+        except ModuleNotFoundError:
+            logger.error("pyautogui not available; skipping bag icon wait")
+            return True
+        
+        rcfg = self.cfg.get("revive", {}) or {}
+        t_path = str(rcfg.get("bag_icon_template", "l9/assets/ui/hud/bag_icon.png"))
+        
+        try:
+            import os
+            if not os.path.exists(t_path):
+                logger.info("Bag icon template missing; skipping wait: %s", t_path)
+                return True
+        except Exception:
+            pass
+        
+        conf = float(rcfg.get("pyauto_threshold", 0.9))
+        roi_name = str(rcfg.get("bag_icon_roi", "hud_anchor")) if rcfg.get("bag_icon_roi") is not None else None
+        region = self._roi_region() if roi_name == "hud_anchor" else None
+        
+        end = time.time() + max(0.0, timeout_s)
+        while time.time() < end:
+            try:
+                box = pag.locateOnScreen(t_path, confidence=conf, region=region) if region else pag.locateOnScreen(t_path, confidence=conf)
+                if box:
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.15)
+        
+        logger.warning("Bag icon not detected within %.1fs; continuing", timeout_s)
+        return False
+
     def run(self) -> bool:  # type: ignore[override]
         rcfg = self.cfg.get("revive", {}) or {}
         t_revive = str(rcfg.get("revive_button", self.T_REVIVE))
@@ -149,7 +187,7 @@ class ReviveFlow(Flow):
                     time.sleep(0.25)
                     state = RState.CHECK_RETRIEVE
                 else:
-                    state = RState.DONE
+                    state = RState.WAIT_HUD
 
             elif state is RState.CHECK_RETRIEVE:
                 # Optional confirm/accept/retrieve
@@ -157,6 +195,19 @@ class ReviveFlow(Flow):
                 if box:
                     self._click_box(box)
                     time.sleep(0.25)
+                state = RState.WAIT_HUD
+
+            elif state is RState.WAIT_HUD:
+                # Wait for HUD to be ready after revive
+                if revived:
+                    # Randomized wait: 1-2 seconds
+                    wait_time = random.uniform(1.0, 2.0)
+                    time.sleep(wait_time)
+                    
+                    # Check for bag icon to ensure HUD is ready
+                    timeout = float(rcfg.get("bag_icon_timeout_s", 12.0))
+                    self._wait_bag_icon(timeout)
+                
                 state = RState.DONE
 
             elif state is RState.DONE:
